@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 repository = "https://github.com/Obsidian-Minecraft-Server-Portal/scheduler.git"
 description = "A simple asyncronous scheduling system"
+readme="README.MD"
 
 
 [dependencies]
