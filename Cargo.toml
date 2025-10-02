@@ -2,6 +2,11 @@
 name = "obsidian-scheduler"
 version = "0.1.0"
 edition = "2024"
+authors = ["Drew Chase"]
+description = "A Rust library for scheduling tasks with both callback and event-based timers."
+license = "MIT"
+repository = "https://github.com/Obsidian-Minecraft-Server-Portal/scheduler.git"
+readme = "README.md"
 
 [dependencies]
 log = { version = "*", optional = true }
