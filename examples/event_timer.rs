@@ -3,7 +3,7 @@ use obsidian_scheduler::timer_trait::Timer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let timer = EventTimer::new("my_timer", tokio::time::Duration::from_secs(5))?;
+    let timer = EventTimer::new("my_timer", tokio::time::Duration::from_secs(5)).await?;
 
     // Subscribe to receive timer events
     let mut receiver = timer.subscribe();
@@ -25,6 +25,10 @@ async fn main() -> anyhow::Result<()> {
     // Stop the timer after receiving the first event
     timer.stop().await?;
     println!("Timer stopped.");
+    
+    // Clean up the timer
+    // This will prevent any further events from being sent
+    timer.drop().await;
 
     Ok(())
 }

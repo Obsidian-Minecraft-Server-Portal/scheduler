@@ -4,7 +4,7 @@ use obsidian_scheduler::timer_trait::Timer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let timer = EventTimer::new("my_timer", tokio::time::Duration::from_secs(3))?;
+    let timer = EventTimer::new("my_timer", tokio::time::Duration::from_secs(3)).await?;
 
     // Subscribe multiple receivers to the same timer (broadcast pattern)
     let mut receiver1 = timer.subscribe();
@@ -75,6 +75,9 @@ async fn main() -> anyhow::Result<()> {
     // Stop the timer
     timer.stop().await?;
     println!("Timer stopped. All receivers completed.");
+
+    // Clean up the timer
+    timer.drop().await;
 
     Ok(())
 }

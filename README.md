@@ -225,6 +225,9 @@ async fn main() -> anyhow::Result<()> {
     timer.stop().await?;
     println!("Timer stopped. All receivers completed.");
 
+    // Clean up the timer
+    timer.drop().await;
+
     Ok(())
 }
 ```
@@ -352,6 +355,10 @@ impl EventTimer {
     
     /// Get a timer by name from the global registry
     pub fn get_timer_by_name(name: impl AsRef<str>) -> Option<EventTimer>;
+    
+    /// Unregisters the timer from the global registry
+    /// This should be called after stopping the timer to prevent memory leaks
+    pub async fn drop(&self);
 }
 ```
 

@@ -2,11 +2,11 @@ use crate::error::SchedulerError;
 use crate::timer_trait::Timer;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
 
-static ACTIVE_TIMERS: OnceLock<StdMutex<HashMap<String, Arc<Mutex<EventTimer>>>>> = OnceLock::new();
+static ACTIVE_TIMERS: OnceLock<Mutex<HashMap<String, Arc<Mutex<EventTimer>>>>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub struct EventTimer {
@@ -55,7 +55,7 @@ impl EventTimer {
     ///   and if it fails, the error is propagated to the caller.
     /// - The returned `EventTimer` is wrapped in an `Arc` and guarded by a `Mutex` for
     ///   safe concurrent access.
-    pub fn new(
+    pub async fn new(
         event_name: impl Into<String>,
         interval: tokio::time::Duration,
     ) -> Result<Self, SchedulerError> {
@@ -66,7 +66,7 @@ impl EventTimer {
             sender,
             handle: Arc::new(Mutex::new(None)),
         };
-        timer.register_timer()?;
+        timer.register_timer().await?;
 
         Ok(timer)
     }
@@ -131,9 +131,9 @@ impl EventTimer {
     /// # Thread Safety
     /// This function uses a `Mutex` to ensure safe access to the `ACTIVE_TIMERS`
     /// collection across threads.
-    fn register_timer(&self) -> Result<(), SchedulerError> {
-        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| StdMutex::new(HashMap::new()));
-        let mut timers = timers_mutex.lock().unwrap();
+    async fn register_timer(&self) -> Result<(), SchedulerError> {
+        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut timers = timers_mutex.lock().await;
         if timers.contains_key(&self.event_name) {
             return Err(SchedulerError::TimerAlreadyExists(self.event_name.clone()));
         }
@@ -141,6 +141,21 @@ impl EventTimer {
 
         Ok(())
     }
+    
+    /// Unregisters a timer by removing it from the active timers collection.
+    ///
+    /// This function removes the timer from the global `ACTIVE_TIMERS` registry,
+    /// preventing memory leaks from accumulating stopped timers.
+    ///
+    /// # Thread Safety
+    /// This function uses a `Mutex` to ensure safe access to the `ACTIVE_TIMERS`
+    /// collection across threads.
+    pub async fn drop(&self) {
+        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut timers = timers_mutex.lock().await;
+        timers.remove(&self.event_name);
+    }
+    
     /// Retrieves a timer by its name from an active timers collection.
     ///
     /// This function asynchronously fetches an `EventTimer` object associated
@@ -181,11 +196,11 @@ impl EventTimer {
     ///   in an async context.
     /// - Ensure thread-safety when managing global shared data like `ACTIVE_TIMERS`.
     pub async fn get_timer_by_name(name: impl AsRef<str>) -> Option<EventTimer> {
-        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| StdMutex::new(HashMap::new()));
+        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| Mutex::new(HashMap::new()));
         let timer_arc = {
-            let timers = timers_mutex.lock().unwrap();
+            let timers = timers_mutex.lock().await;
             timers.get(name.as_ref()).cloned()
-        }; // StdMutex lock is released here
+        }; // Mutex lock is released here
         
         if let Some(arc) = timer_arc {
             let timer = arc.lock().await;
@@ -208,15 +223,16 @@ impl Timer for EventTimer {
     /// # Errors
     /// Returns a `SchedulerError::TimerAlreadyExists` if the timer is already running.
     async fn start(&self) -> Result<(), SchedulerError> {
+        // Acquire lock first to make check-and-start atomic (prevents TOCTOU race condition)
+        let mut handle_guard = self.handle.lock().await;
         
-        if self.is_running().await {
+        if handle_guard.is_some() {
             return Err(SchedulerError::TimerAlreadyExists(self.event_name.clone()));
         }
         
         let sender = self.sender.clone();
         let interval = self.interval;
         let event_name = self.event_name.clone();
-        let handle = Arc::clone(&self.handle);
 
         let task = tokio::spawn(async move {
             loop {
@@ -227,12 +243,9 @@ impl Timer for EventTimer {
             }
         });
 
-        // Store the handle so we can stop it later
-        let handle_clone = Arc::clone(&handle);
-        tokio::spawn(async move {
-            let mut h = handle_clone.lock().await;
-            *h = Some(task);
-        });
+        // Store the handle atomically while holding the lock
+        *handle_guard = Some(task);
+        drop(handle_guard);
         Ok(())
     }
 
@@ -253,14 +266,12 @@ impl Timer for EventTimer {
             return Err(SchedulerError::TimerNotRunning(self.event_name.clone()));
         }
         
-        let handle = Arc::clone(&self.handle);
-        tokio::spawn(async move {
-            let mut h = handle.lock().await;
-            if let Some(task) = h.take() {
-                task.abort();
-            }
-        });
-
+        let mut h = self.handle.lock().await;
+        if let Some(task) = h.take() {
+            task.abort();
+        }
+        drop(h); // Release the lock before calling unregister_timer
+        
         Ok(())
     }
 

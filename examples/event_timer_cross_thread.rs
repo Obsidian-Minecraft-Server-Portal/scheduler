@@ -5,7 +5,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Create and start a timer in the main thread
-    let timer = EventTimer::new("cross_thread_timer", tokio::time::Duration::from_secs(2))?;
+    let timer = EventTimer::new("cross_thread_timer", tokio::time::Duration::from_secs(2)).await?;
     
     // Subscribe in the main thread
     let mut main_receiver = timer.subscribe();
@@ -78,6 +78,9 @@ async fn main() -> anyhow::Result<()> {
     println!("  2. Retrieving the same timer by name from a different task");
     println!("  3. Subscribing to events from multiple threads");
     println!("  4. Controlling the timer (stopping) from a different thread");
+    
+    // Clean up the timer
+    timer.drop().await;
     
     Ok(())
 }

@@ -261,7 +261,10 @@ impl Timer for CallbackTimer {
     /// # Features
     /// - `log`: Enables logging of errors during callback execution using the `log` crate.
     async fn start(&self) -> Result<(), SchedulerError> {
-        if self.is_running().await {
+        // Acquire lock first to make check-and-start atomic (prevents TOCTOU race condition)
+        let mut handle_guard = self.handle.lock().await;
+        
+        if handle_guard.is_some() {
             return Err(SchedulerError::TimerAlreadyExists(
                 "CallbackTimer".to_string(),
             ));
@@ -269,7 +272,6 @@ impl Timer for CallbackTimer {
 
         let callback = Arc::clone(&self.callback);
         let interval = self.interval;
-        let handle = Arc::clone(&self.handle);
 
         // Create a TimerHandle that can be passed to the callback
         let timer_handle = TimerHandle {
@@ -289,12 +291,9 @@ impl Timer for CallbackTimer {
             }
         });
 
-        // Store the handle so we can stop it later
-        let handle_clone = Arc::clone(&handle);
-        tokio::spawn(async move {
-            let mut h = handle_clone.lock().await;
-            *h = Some(task);
-        });
+        // Store the handle atomically while holding the lock
+        *handle_guard = Some(task);
+        drop(handle_guard);
 
         Ok(())
     }
@@ -343,13 +342,10 @@ impl Timer for CallbackTimer {
             return Err(SchedulerError::TimerNotRunning("CallbackTimer".to_string()));
         }
 
-        let handle = Arc::clone(&self.handle);
-        tokio::spawn(async move {
-            let mut h = handle.lock().await;
-            if let Some(task) = h.take() {
-                task.abort();
-            }
-        });
+        let mut h = self.handle.lock().await;
+        if let Some(task) = h.take() {
+            task.abort();
+        }
 
         Ok(())
     }
