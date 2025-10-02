@@ -1,4 +1,8 @@
+use crate::error::SchedulerError;
 use crate::timer_trait::Timer;
+use anyhow::Result;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -23,43 +27,44 @@ impl TimerHandle {
     }
 }
 
-pub struct CallbackTimer<F>
-where
-    F: FnMut(TimerHandle) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
-        + Send
-        + 'static,
-{
-    callback: Arc<Mutex<F>>,
+type BoxedCallback = Box<
+    dyn Fn(TimerHandle) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send + Sync,
+>;
+
+pub struct CallbackTimer {
+    callback: Arc<BoxedCallback>,
     interval: tokio::time::Duration,
     handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
-impl<F> CallbackTimer<F>
-where
-    F: FnMut(TimerHandle) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
-        + Send
-        + 'static,
-{
-    pub fn new(callback: F, interval: tokio::time::Duration) -> Arc<Self> {
+impl CallbackTimer {
+    pub fn new<F, Fut>(callback: F, interval: tokio::time::Duration) -> Arc<Self>
+    where
+        F: Fn(TimerHandle) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        let boxed: BoxedCallback = Box::new(move |handle| Box::pin(callback(handle)));
+
         Arc::new(CallbackTimer {
-            callback: Arc::new(Mutex::new(callback)),
+            callback: Arc::new(boxed),
             interval,
             handle: Arc::new(Mutex::new(None)),
         })
     }
 }
 
-impl<F> Timer for CallbackTimer<F>
-where
-    F: FnMut(TimerHandle) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
-        + Send
-        + 'static,
-{
-    fn start(&self) {
+impl Timer for CallbackTimer {
+    async fn start(&self) -> Result<(), SchedulerError> {
+        if self.is_running().await {
+            return Err(SchedulerError::TimerAlreadyExists(
+                "CallbackTimer".to_string(),
+            ));
+        }
+
         let callback = Arc::clone(&self.callback);
         let interval = self.interval;
         let handle = Arc::clone(&self.handle);
-        
+
         // Create a TimerHandle that can be passed to the callback
         let timer_handle = TimerHandle {
             handle: Arc::clone(&self.handle),
@@ -68,9 +73,7 @@ where
         let task = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                let mut cb = callback.lock().await;
-                let future = cb(timer_handle.clone());
-                drop(cb); // Release the lock before awaiting
+                let future = callback(timer_handle.clone());
                 if let Err(e) = future.await {
                     #[cfg(feature = "log")]
                     log::error!("Callback execution failed: {:?}", e);
@@ -86,9 +89,15 @@ where
             let mut h = handle_clone.lock().await;
             *h = Some(task);
         });
+
+        Ok(())
     }
 
-    fn stop(&self) {
+    async fn stop(&self) -> Result<(), SchedulerError> {
+        if !self.is_running().await {
+            return Err(SchedulerError::TimerNotRunning("CallbackTimer".to_string()));
+        }
+
         let handle = Arc::clone(&self.handle);
         tokio::spawn(async move {
             let mut h = handle.lock().await;
@@ -96,11 +105,14 @@ where
                 task.abort();
             }
         });
+
+        Ok(())
     }
 
-    fn reset(&self) {
-        self.stop();
-        self.start();
+    async fn reset(&self) -> Result<(), SchedulerError> {
+        self.stop().await?;
+        self.start().await?;
+        Ok(())
     }
 
     async fn is_running(&self) -> bool {

@@ -5,11 +5,10 @@ use obsidian_scheduler::timer_trait::Timer;
 #[tokio::main]
 async fn main() {
 	let timer = CallbackTimer::new(
-		|_timer_handle| {
-			Box::pin(async move {
-				println!("Timer fired!");
-				Ok(())
-			})
+		async |timer_handle| {
+			println!("Timer fired!");
+			timer_handle.stop(); // Stop the timer after the first fire
+			Ok(())
 		},
 		Duration::from_secs(5),
 	);
@@ -18,6 +17,8 @@ async fn main() {
 
 	println!("This should print immediately, waiting for timer to fire ...");
 
-	tokio::time::sleep(Duration::from_secs(6)).await;
+	while timer.is_running().await {
+		tokio::time::sleep(Duration::from_secs(1)).await;
+	}
 	println!("Timer fired, exiting now.");
 }

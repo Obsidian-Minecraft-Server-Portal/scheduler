@@ -10,21 +10,25 @@ async fn main() {
     let exit_flag_counter_clone = Arc::clone(&exit_flag_counter);
     println!("Starting callback timer ...");
 
+    let counter_for_callback = Arc::clone(&exit_flag_counter_clone);
     let timer = CallbackTimer::new(
         move |timer_handle| {
-            let counter = Arc::clone(&exit_flag_counter_clone);
-            Box::pin(async move {
-                println!("Timer fired! Incrementing exit flag... {}", *counter.lock().await);
+            let counter = counter_for_callback.clone();
+            async move {
+                println!(
+                    "Timer fired! Incrementing exit flag... {}",
+                    *counter.lock().await
+                );
                 let mut flag = counter.lock().await;
                 *flag += 1;
-                
+
                 if *flag >= 3 {
                     println!("Exit flag reached 3, stopping timer.");
                     timer_handle.stop();
                 }
-                
+
                 Ok(())
-            })
+            }
         },
         Duration::from_secs(5),
     );
@@ -32,13 +36,12 @@ async fn main() {
     timer.start();
 
     println!("This should print immediately, waiting for timer to fire ...");
-    
+
     while timer.is_running().await {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let counter = exit_flag_counter.lock().await;
         println!("Counter is at: {}", *counter);
         drop(counter); // Release the lock before sleeping
-        
     }
     println!("Timer fired, exiting now.");
 }
