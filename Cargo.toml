@@ -4,3 +4,32 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+log = { version = "*", optional = true }
+anyhow = { version = ">=1" }
+thiserror = { version = "2.0.17" }
+serde = { version = ">=1", features = ["derive"], optional = true }
+tokio = { version = ">=1", features = ["time", "rt", "sync", "rt-multi-thread"], optional = true }
+
+
+[features]
+default = ["callback-timers"]
+log = ["dep:log"]
+serde = ["dep:serde"]
+event-timers = ["tokio", "tokio/sync"]
+callback-timers = ["tokio"]
+examples = ["log", "serde", "event-timers", "callback-timers", "tokio/macros"]
+
+[[example]]
+name = "callback_timer"
+path = "examples/callback_timer.rs"
+required-features = ["examples"]
+
+[[example]]
+name = "callback_timer_basic"
+path = "examples/callback_timer_basic.rs"
+required-features = ["examples"]
+
+[[example]]
+name = "event_timer"
+path = "examples/event_timer.rs"
+required-features = ["examples"]
