@@ -2,11 +2,11 @@ use crate::error::SchedulerError;
 use crate::timer_trait::Timer;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
 
-static ACTIVE_TIMERS: OnceLock<HashMap<String, Arc<Mutex<EventTimer>>>> = OnceLock::new();
+static ACTIVE_TIMERS: OnceLock<StdMutex<HashMap<String, Arc<Mutex<EventTimer>>>>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub struct EventTimer {
@@ -40,8 +40,8 @@ impl EventTimer {
     }
 
     fn register_timer(&self) -> Result<(), SchedulerError> {
-        let timers = ACTIVE_TIMERS.get_or_init(HashMap::new);
-        let mut timers = timers.clone();
+        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| StdMutex::new(HashMap::new()));
+        let mut timers = timers_mutex.lock().unwrap();
         if timers.contains_key(&self.event_name) {
             return Err(SchedulerError::TimerAlreadyExists(self.event_name.clone()));
         }
@@ -49,9 +49,19 @@ impl EventTimer {
 
         Ok(())
     }
-    pub fn get_timer_by_name(name: impl AsRef<str>) -> Option<EventTimer> {
-        let timers = ACTIVE_TIMERS.get_or_init(HashMap::new);
-        timers.get(name.as_ref()).map(|t| t.blocking_lock().clone())
+    pub async fn get_timer_by_name(name: impl AsRef<str>) -> Option<EventTimer> {
+        let timers_mutex = ACTIVE_TIMERS.get_or_init(|| StdMutex::new(HashMap::new()));
+        let timer_arc = {
+            let timers = timers_mutex.lock().unwrap();
+            timers.get(name.as_ref()).cloned()
+        }; // StdMutex lock is released here
+        
+        if let Some(arc) = timer_arc {
+            let timer = arc.lock().await;
+            Some(timer.clone())
+        } else {
+            None
+        }
     }
 }
 

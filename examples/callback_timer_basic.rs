@@ -13,7 +13,7 @@ async fn main() {
 		Duration::from_secs(5),
 	);
 
-	timer.start();
+	timer.start().await.expect("Failed to start timer");
 
 	println!("This should print immediately, waiting for timer to fire ...");
 

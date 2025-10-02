@@ -38,3 +38,8 @@ required-features = ["examples"]
 name = "event_timer_multiple"
 path = "examples/event_timer_multiple.rs"
 required-features = ["examples"]
+
+[[example]]
+name = "event_timer_cross_thread"
+path = "examples/event_timer_cross_thread.rs"
+required-features = ["examples"]
