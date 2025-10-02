@@ -33,3 +33,8 @@ required-features = ["examples"]
 name = "event_timer"
 path = "examples/event_timer.rs"
 required-features = ["examples"]
+
+[[example]]
+name = "event_timer_multiple"
+path = "examples/event_timer_multiple.rs"
+required-features = ["examples"]

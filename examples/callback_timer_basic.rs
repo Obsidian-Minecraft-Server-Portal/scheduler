@@ -5,7 +5,7 @@ use obsidian_scheduler::timer_trait::Timer;
 #[tokio::main]
 async fn main() {
 	let timer = CallbackTimer::new(
-		move || {
+		|_timer_handle| {
 			Box::pin(async move {
 				println!("Timer fired!");
 				Ok(())
